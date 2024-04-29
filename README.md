@@ -170,3 +170,24 @@
         }
     }
 ```
+## 트랜잭션 옵션
+- 추후 필요할 때 복습
+
+## 예외와 트랜잭션션 커밋, 롤백
+- 예외가 발생하고, 트랜잭션 범위 밖으로 예외를 던지게 되면
+- 스프링 트랜백션 AOP는 예외의 종류에 따라 트랜잭션을 커밋하거나 롤백한다.
+  - 롤백 : 언체크 예외 - `RuntimeException`, `Error`와 그  하위 예외 
+  - 커밋 : 체크 예외 - `Exception`
+- 스프링은 왜 체크 예외는 커밋하고 언체크 예외를 롤백할까? 
+  - 기본적으로 체크 예외는 비즈니스 의미가 있을 때 사용하고, 런타임 예외는 복구 불가능한 예외로 가정하기 때문이다. 
+  - 비즈니스 상황에 따라 체크 예외를 롤백하고 싶으면 `rollbackFor` 옵션을 사용한다. 
+- 커밋/롤백 여부 로그 확인 코드
+  - application.properties
+    ```properties
+    logging.level.org.springframework.transaction.interceptor=TRACE
+    logging.level.org.springframework.jdbc.datasource.DataSourceTransactionManager=D
+    EBUG
+    #JPA log
+    logging.level.org.springframework.orm.jpa.JpaTransactionManager=DEBUG
+    logging.level.org.hibernate.resource.transaction=DEBUG
+    ```
