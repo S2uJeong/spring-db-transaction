@@ -191,3 +191,57 @@
     logging.level.org.springframework.orm.jpa.JpaTransactionManager=DEBUG
     logging.level.org.hibernate.resource.transaction=DEBUG
     ```
+    
+## 트랜잭션 전파 (propagation)
+- 트랜잭션이 이미 진행중인데, 여기에 추가로 트랜잭션을 또 수행하려고 한다면 어떻게 해야할까.
+- 이때 어떻게 동작할지 결정하는 것을 트랜잭션 전파라고 한다. 
+- 스프링은 다양한 트랜잭션 전파 옵션을 제공한다.
+
+
+### 물리/논리 트랜잭션
+- 물리 : DB에 적용되는 트랜잭셔
+- 논리 : 트랜잭션 매니저를 통해 트랜잭션을 사용하는 단위
+- 논리 트랜잭션 개념은 트랜잭션이 진행되는 중에 내부에 추가로 트랜잭션을 사용하는 경우에 나타난다. 
+
+### 기본 옵션 - `REQUIRED`
+- 외부 트랜잭션과 내부 트랜잭션을 묶어서 하나의 트랜잭션으로 만듬.
+- 내부 트랜잭션이 외부 트랜잭션에 참여하는 것이다.
+- 클라이언트에 가까울 수록 외부이며, 먼저 실행된 트랜잭션이 외부라고 할 수 있다.
+
+- 원칙
+  - 모든 논리 트랜잭션이 커밋되어야 물리 트랜잭션이 커밋된다.
+  - 하나의 논리 트랜잭션이라도 롤백되면 물리 트랜잭션은 롤백된다. 
+
+- Participating in existing transaction
+  - 트랜잭션은 묶이지만, 한 트랙잭션에 커밋 및 롤백을 여러번 할 수 있는데. 어떻게 가능한걸까?
+  - 내부 트랜잭션이 외부 트랜잭션에 참여한다는 뜻 =  외부 트랜잭션만 물리 트랜잭션을 시작하고, 커밋한다
+  - ![img.png](img/트랜잭션_전파.png)
+  - ![img.png](img/트랜잭션_전파2.png)
+  - 그렇다면 커밋/롤백 권한을 가진 외부 트랜잭션의 로직은 성공하고 내부 트랜잭션은 로직이 실패하여 `Rollback`을 실행한다면 어떻게 될까.
+    - 이때, 내부 트랜잭션에서 롤백을 실제로 실행하면, 외부 트랜잭션까지 이어지지 않아 오류가 발생할 것이다.
+    - 따라서 내부 트랜잭션은 물리 트랜잭션을 롤백하지 않는 대신에 트랜잭션 동기화 매니저에 `rollbackOnly=true`라는 표시를 한다.
+    - 이후 외부 트랜잭션에서 커밋시점에 동기화 매니저에 표시를 보고 커밋이 아닌 롤백한다. 
+    - 스프링은 이 경우 `UnecpectedRollbackException` 런타임 예외를 던진다. 
+
+### 옵션 - `Requires_new`
+- 외부 트랜잭션과 내부 트랜잭션을 완전히 분리해서 사용하는 방법 = 각각 별도의 물리 트랜잭션을 사용
+- 이 옵션에서의 동장방식은, 이전과 달리 내부 트랜잭션을 시작할 깨 기존 트랜잭션에 참여하는게 아니라 새로운 물리 트랜잭션을 만들어서 시작한다 .
+- 이 방법은 커넥션이 동시에 2개가 사용된다는 점을 주의해야 한다. 
+```java
+  @Test
+  void inner_rollback_requires_new() {
+    log.info("외부 트랜잭션 시작");
+    TransactionStatus outer = txManager.getTransaction(new DefaultTransactionAttribute());
+    log.info("outer.isNewTransaction()={}", outer.isNewTransaction()); // 외부 트랜잭션은 new Transaction
+  
+    log.info("내부 트랜잭션 시작");
+    DefaultTransactionAttribute definition = new DefaultTransactionAttribute();
+    definition.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW); // 다른 트랜잭션 시작 전에 옵션을 등록
+    TransactionStatus inner = txManager.getTransaction(new DefaultTransactionAttribute());
+    log.info("inner.isNewTransaction()={}", inner.isNewTransaction()); // 내부 트랜잭션은 new Transaction이 아닌데 위 옵션덕분에 True이다.
+  
+    txManager.rollback(inner); //롤백
+    txManager.commit(outer); //커밋
+  }
+```
+
