@@ -24,3 +24,10 @@
 - 그리고 프록시는 내부에 실제 객체를 참조하게 된다. 
 - ` TransactionSynchronizationManager.isActualTransactionActive()` 
   - 현재 쓰레드에 트랜잭션이 적용되어 있는지 확인할 수 있는 기능 
+
+### 트랜잭션 적용 위치에 따른 우선순위 
+- 항상 더 구체적이고 자세한 것이 높은 우선순위를 가진다.
+  - 메서드 -> 클래스 -> 인터페이스 
+- TxLevelTest.class
+
+
