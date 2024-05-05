@@ -191,6 +191,30 @@
     logging.level.org.springframework.orm.jpa.JpaTransactionManager=DEBUG
     logging.level.org.hibernate.resource.transaction=DEBUG
     ```
+- ```java
+  @Slf4j
+    static class RollbackService{
+        // 런타임 예외 발생 : 롤백
+        @Transactional
+        public void runtimeException() {
+            log.info("call runtimeException");
+            throw new RuntimeException();
+        }
+        // 체크 예외 발생 : 커밋
+        @Transactional
+        public void checkedException() throws MyException {
+            log.info("call checkedExceprion");
+            throw new MyException();
+        }
+        // 체크 예외 rollbackFor 옵션으로 지정 : 롤백
+        @Transactional(rollbackFor = MyException.class)
+        public void rollbackFor() throws MyException {
+            log.info("call rollbackFor");
+            throw new MyException();
+        }
+
+    }
+  ```
     
 ## 트랜잭션 전파 (propagation)
 - 트랜잭션이 이미 진행중인데, 여기에 추가로 트랜잭션을 또 수행하려고 한다면 어떻게 해야할까.
@@ -198,14 +222,18 @@
 - 스프링은 다양한 트랜잭션 전파 옵션을 제공한다.
 
 
-### 물리/논리 트랜잭션
-- 물리 : DB에 적용되는 트랜잭셔
-- 논리 : 트랜잭션 매니저를 통해 트랜잭션을 사용하는 단위
-- 논리 트랜잭션 개념은 트랜잭션이 진행되는 중에 내부에 추가로 트랜잭션을 사용하는 경우에 나타난다. 
-
+### 트랜잭션 종류 정리 
+- 물리/논리 트랜잭션
+  - 물리 : DB에 적용되는 트랜잭셔
+  - 논리 : 트랜잭션 매니저를 통해 트랜잭션을 사용하는 단위
+  - 논리 트랜잭션 개념은 트랜잭션이 진행되는 중에 내부에 추가로 트랜잭션을 사용하는 경우에 나타난다. 
+- 외부/내부 트랜잭션
+  - 외부 : 먼저 호출된 트랜잭션
+  - 내부 : 외부 트랜잭션 이후에 호출된 트랜잭션 
+  
 ### 기본 옵션 - `REQUIRED`
 - 외부 트랜잭션과 내부 트랜잭션을 묶어서 하나의 트랜잭션으로 만듬.
-- 내부 트랜잭션이 외부 트랜잭션에 참여하는 것이다.
+- **내부 트랜잭션이 외부 트랜잭션에 참여하는 것이다.**
 - 클라이언트에 가까울 수록 외부이며, 먼저 실행된 트랜잭션이 외부라고 할 수 있다.
 
 - 원칙
@@ -228,22 +256,33 @@
 - 이 옵션에서의 동장방식은, 이전과 달리 내부 트랜잭션을 시작할 깨 기존 트랜잭션에 참여하는게 아니라 새로운 물리 트랜잭션을 만들어서 시작한다 .
 - 이 방법은 커넥션이 동시에 2개가 사용된다는 점을 주의해야 한다. 
 ```java
-  @Test
-  void inner_rollback_requires_new() {
-    log.info("외부 트랜잭션 시작");
-    TransactionStatus outer = txManager.getTransaction(new DefaultTransactionAttribute());
-    log.info("outer.isNewTransaction()={}", outer.isNewTransaction()); // 외부 트랜잭션은 new Transaction
+  public class LogRepository {
+    private final EntityManager em;
   
-    log.info("내부 트랜잭션 시작");
-    DefaultTransactionAttribute definition = new DefaultTransactionAttribute();
-    definition.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW); // 다른 트랜잭션 시작 전에 옵션을 등록
-    TransactionStatus inner = txManager.getTransaction(new DefaultTransactionAttribute());
-    log.info("inner.isNewTransaction()={}", inner.isNewTransaction()); // 내부 트랜잭션은 new Transaction이 아닌데 위 옵션덕분에 True이다.
-  
-    txManager.rollback(inner); //롤백
-    txManager.commit(outer); //커밋
+    @Transactional(propagation = Propagation.REQUIRES_NEW) // REQUIRES_NEW 설정
+    public void save(Log logMessage) { ...}
   }
 ```
+```java
+    /**
+     * MemberService @Transactional:ON
+     * MemberRepository @Transactional:ON
+     * LogRepository @Transactional(REQUIRES_NEW) Exception
+     */
+    @Test
+    void recoverException_success() {
+            //given
+            String username = "로그예외_recoverException_success";
+            //when
+            memberService.joinV2(username); // 예외 잡는 로직 포함된 함수
+
+            //then : member 저장, log 롤백 
+            assertTrue(memberRepository.find(username).isPresent());
+            assertTrue(logRepository.find(username).isEmpty());
+            }
+```
+- ![img.png](img/requires_new.png)
+
 ### 서비스단에서 트랜잭션을 시작하라.
 - /propagation/*
 - Repo를 호출하는 서비스단에서 트랜잭션을 처리하게 되면 논리/물리/외부/내부 트랜잭션 과 관련된 트랜잭션 전파와 같은 것을 고민할 필요 없이
@@ -251,4 +290,5 @@
 - 서비스단의 시작부터 끝까지, 관련 로직은 해당 트랜잭션이 생성한 커넥션을 사용하게 된다. 
 - 이렇게 구성하면, 물리 트랜잭션으로 함께 묶여 있는 논리 트랜잭션 중 하나라도 error나 rollback이 발생하면 rollback이 되어 데이터 연산이 이뤄지지 않는다.
   - 비즈니스 요구 중, 회원 가입을 시도한 로그를 남기는데 실패하더라도 회원 가입은 유지되어야 한다는 조건이 있다면 어떻게 할까 
-  - 
+  - 참고로 서비스/repo단에 다 트랜잭션 처리를 한 뒤, 서비스단에서 예외를 잡는다고 해도, 이미 내부에서 rollbackOnly가 표시되면 외부에서 commit될 시 `UnexpectedRollbackException`가 발생됨
+- 로그와 멤버 repo처럼 커밋과 롤백 조건을 달리해야하는 경우 `Requires_new` 옵션을 활용하라.
